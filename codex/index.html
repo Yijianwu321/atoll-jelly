@@ -1381,10 +1381,14 @@ function createSimulation(options = {}) {
       sc[p]=Math.min(c,coefficient[si[p]]);
     }
   }
+  function swellAt(x,z){
+    const t=state.time;
+    return .018*Math.sin(11*x+14*z+t*1.95)+.012*Math.sin(-18*x+9*z-t*1.7);
+  }
   function water(x,z){
     const a=clamp((x+half)/dx,0,N-1.00001), b=clamp((z+half)/dx,0,N-1.00001);
     const i=a|0,j=b|0,k=j*N+i,u=a-i,v=b-j;
-    return state.sea+mix(mix(H[k],H[k+1],u),mix(H[k+N],H[k+N+1],u),v);
+    return state.sea+mix(mix(H[k],H[k+1],u),mix(H[k+N],H[k+N+1],u),v)+swellAt(x,z);
   }
   function fluid(){
     const strength=mix(.72,1.14,clamp(state.params.stiffness,0,1));
@@ -1565,8 +1569,12 @@ function createSimulation(options = {}) {
     if(id==='parked'){p.pitch+=.004*Math.sin(state.time*25);p.roll+=.005*Math.sin(state.time*18);}
     if(dt>0&&wet&&!everWet&&id==='splashdown'){
       m.landings++;m.lastLandingAt=state.time;
-      impulse(x+rx,z+rz,2.55,.27);impulse(x-rx,z-rz,2.55,.27);
-      splash(x,z,2.65,yaw+Math.PI);panic(x,z,1.8);
+      // Two pontoons create separate depressions; their expanding wavefronts then interfere.
+      const leftX=x+rx,leftZ=z+rz,rightX=x-rx,rightZ=z-rz;
+      impulse(leftX,leftZ,-3.35,.39);impulse(rightX,rightZ,-3.35,.39);
+      impulse(leftX,leftZ,.78,.64);impulse(rightX,rightZ,.78,.64);
+      splash(leftX,leftZ,1.55,yaw+Math.PI);splash(rightX,rightZ,1.55,yaw+Math.PI);
+      splash(x,z,1.85,yaw+Math.PI);panic(x,z,1.8);
     }
     if(dt>0&&wet&&speed>.20&&state.time>=nextWake){
       nextWake=state.time+.076;
@@ -1998,7 +2006,8 @@ fn bed(xz:vec2f)->f32 {
 }
 fn wave(p:vec2f)->f32 {
  let t=s.info.y;
- return ht(p)+ .0045*sin(dot(p,vec2f(11.,14.))+t*1.95) +.0036*sin(dot(p,vec2f(-18.,9.))-t*1.7);
+ // Readable, low-frequency swell layered over the simulated height field.
+ return ht(p)+ .018*sin(dot(p,vec2f(11.,14.))+t*1.95) +.012*sin(dot(p,vec2f(-18.,9.))-t*1.7);
 }
 fn roundP(p:vec2f)->vec2f {
  let c=sign(p)*vec2f(H-.075);
@@ -2026,7 +2035,10 @@ fn waterVertex(p:vec3f,n:vec3f,uv:vec2f,kind:u32)->WV {
  xz=roundP(xz);
  let bevel=max(0.,(abs(q)-H+.075)/.075);
  n=normalize(n+bevel*vec3f(select(0.,sign(xz.x),face>=2u),0,select(0.,sign(xz.y),face<2u))*.96);
- let bulge=.012*sin(v*3.14159);
+ let edgeWave=clamp(wave(xz)-s.info.x,-.08,.08);
+ let belly=sin(v*3.14159);
+ let flex=.009*sin(s.info.y*1.45+q*1.35)*belly;
+ let bulge=.016*belly+.30*edgeWave*belly+flex;
  xz+=n.xz*bulge;
  return waterVertex(vec3f(xz.x,mix(B,s.info.x+wave(xz),v),xz.y),n,vec2f(u,v),face+1u);
 }
@@ -2051,7 +2063,8 @@ fn waterVertex(p:vec3f,n:vec3f,uv:vec2f,kind:u32)->WV {
    let coast=1.-smoothstep(.035,.13,abs(depth-.02+sin(xz.x*21.+t*1.8)*.018));
    let shore=coast*(.77+foam*.23);
    let rim=1.-smoothstep(.012,.048,edge);
-   let glint=clamp(fres*.57+lit*.32+shimmer*.11+shore*.4+rim*.48,0.,1.);
+   let crest=smoothstep(.012,.052,o.p.y-s.info.x);
+   let glint=clamp(fres*.57+lit*.32+shimmer*.11+shore*.4+rim*.48+crest*.22,0.,1.);
    let pattern=(.4+.6*noise(xz*38.+t*.31))*foam;
    var rgb=mix(aqua,frosty,glint);
    rgb=mix(rgb,vec3f(.99,1.,.918),max(shore*.46,rim*.74));
