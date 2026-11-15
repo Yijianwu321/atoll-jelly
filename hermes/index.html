@@ -1465,14 +1465,19 @@ class WaterSim {
     const h = this.h, r0 = j * n + i, r1 = r0 + n;
     const a = h[r0] * (1 - tx) + h[r0 + 1] * tx;
     const b = h[r1] * (1 - tx) + h[r1 + 1] * tx;
-    return (a * (1 - tz) + b * tz) + this.seaLevel;
+    const base = a * (1 - tz) + b * tz;
+    const t = World.time;
+    const swell = Math.sin(x * 0.62 + t * 0.95) * 0.020
+                + Math.sin(z * 0.81 - t * 0.72) * 0.015
+                + Math.sin((x + z) * 1.05 + t * 1.35) * 0.008;
+    return base + seaLevel() + swell;
   }
   grad(x, z) {
     const e = this.dx * 1.2;
     return [(this.sample(x + e, z) - this.sample(x - e, z)) / (2 * e), (this.sample(x, z + e) - this.sample(x, z - e)) / (2 * e)];
   }
   upload() {
-    const n = this.n, sea = this.seaLevel;
+    const n = this.n, sea = seaLevel();
     for (let i = 0; i < this.h.length; i++) this.tex[i] = this.h[i] + sea;
     return this.tex;
   }
@@ -1528,7 +1533,7 @@ const PARK = [-4.75, 5.95], RUN_START = [1.35, 5.95], RUN_END = [3.5, 5.95];
 const Plane = {
   phase: 'dock', t: 0, cycle: 0, cycleCount: 0,
   pos: [-4.75, 0.5, 5.95], yaw: Math.PI / 2, pitch: 0, roll: 0, speed: 0,
-  prop: 0, propSpeed: 7, bobPhase: 0, splashCd: 0, touched: false,
+  prop: 0, propSpeed: 7, bobPhase: 0, splashCd: 0, touched: false, wakeRippleCd: 0,
   airborne: false, landings: 0, takeoffs: 0, maxY: 0,
   taxiInPath: buildPath([[-0.85, 6.7], [-2.0, 7.35], [-4.9, 7.3], [-6.7, 6.3], [-6.3, 5.25], [-5.2, 5.9], PARK]),
   taxiOutPath: buildPath([[PARK[0], PARK[1]], [-2.0, 5.95], [RUN_START[0], RUN_START[1]]]),
@@ -1736,19 +1741,35 @@ const Plane = {
   },
   wake(dt, k) {
     if (k <= 0.01) return;
-    for (const p of this.floatPts(this.pos, this.yaw)) {
-      World.water.press(p[0], p[2], 0.42, 0.014 * k * dt * 60, 1);
+    const pts = this.floatPts(this.pos, this.yaw);
+    for (const p of pts) {
+      World.water.press(p[0], p[2], 0.42, 0.022 * k * dt * 60, 1);
       if (Math.random() < 0.28 * k) World.spawnBubble(p[0] + (Math.random() - .5) * 0.2, 0.02, p[2] + (Math.random() - .5) * 0.2, 0.05);
+    }
+    // Periodic aft-pontoon wave sources make a continuous, readable V-shaped wake.
+    this.wakeRippleCd -= dt;
+    if (this.wakeRippleCd <= 0 && this.speed > 0.45) {
+      this.wakeRippleCd = 0.15;
+      const amp = 0.20 + Math.min(0.16, k * 0.08);
+      for (const p of [pts[2], pts[3]]) World.spawnRipple(p[0], p[2], amp);
     }
   },
   touch() {
-    const x = this.pos[0], z = this.pos[2];
-    World.spawnSplash(x, 0.05, z, 26, 1.75);
-    World.spawnRipple(x, z, 1.35);
-    World.spawnRipple(x, z, 0.9);
-    World.water.press(x, z, 0.8, 0.5, 0);
-    World.water.press(x, z, 1.4, 0.22, 0);
-    if (App.hud) App.hud.flash('水上飞机接水');
+    const pts = this.floatPts(this.pos, this.yaw);
+    const f = floatSample(pts);
+    // Seat both pontoons into the surface before emitting the impact.
+    this.pos[1] = f.y + 0.49 * 0.86;
+    const left = [(pts[0][0] + pts[2][0]) * 0.5, (pts[0][2] + pts[2][2]) * 0.5];
+    const right = [(pts[1][0] + pts[3][0]) * 0.5, (pts[1][2] + pts[3][2]) * 0.5];
+    for (const [x, z] of [left, right]) {
+      const y = World.water.sample(x, z);
+      World.spawnSplash(x, y, z, 18, 1.35);
+      World.spawnRipple(x, z, 1.65);
+      World.water.press(x, z, 0.62, 0.42, 0);
+      World.water.press(x, z, 1.08, 0.18, 0);
+    }
+    World.spawnRipple(this.pos[0], this.pos[2], 0.52);
+    if (App.hud) App.hud.flash('双浮筒接水 · 果冻冲击波');
   },
   onButton() {
     if (this.phase === 'approach' || this.phase === 'turn') {
@@ -2215,8 +2236,8 @@ const World = {
     this.spawnRipple(x, z, 0.35 * k);
     if (Math.random() < 0.4) this.spawnBubble(x + (Math.random() - .5) * 0.3, 0.0, z + (Math.random() - .5) * 0.3, 0.05);
     // tilt impulse from stirring at an offset
-    this.tvX += -x * 0.0006 * k;
-    this.tvZ += z * 0.0006 * k;
+    this.tvX += -x * 0.0018 * k;
+    this.tvZ += z * 0.0018 * k;
     this.mint = Math.min(100, this.mint + 0.25);
   },
   update(dt) {
@@ -2240,8 +2261,8 @@ const World = {
     const k = 26, damp = 4.2;
     this.tvX += (-this.tiltX * k - this.tvX * damp) * dt;
     this.tvZ += (-this.tiltZ * k - this.tvZ * damp) * dt;
-    this.tiltX = clamp(this.tiltX + this.tvX * dt, -0.022, 0.022);
-    this.tiltZ = clamp(this.tiltZ + this.tvZ * dt, -0.022, 0.022);
+    this.tiltX = clamp(this.tiltX + this.tvX * dt, -0.04, 0.04);
+    this.tiltZ = clamp(this.tiltZ + this.tvZ * dt, -0.04, 0.04);
     this.mint = Math.max(40, this.mint - dt * 0.06);
     this.simMs = performance.now() - t0;
     this.metric.push(this.simMs);
@@ -2565,7 +2586,15 @@ struct VOut {
   @location(2) @interpolate(flat) face : f32,
 };
 @vertex fn vs(@location(0) p : vec3f, @location(1) n : vec3f, @location(2) c : vec3f, @location(3) face : f32) -> VOut {
-  let wp = (G.block * vec4f(p, 1.0)).xyz;
+  // Soft-body sidewall flex. Top and bottom seams remain fixed while the belly breathes.
+  var jellyP = p;
+  let v = clamp((p.y + 3.42) / 3.52, 0.0, 1.0);
+  let belly = sin(v * 3.14159265);
+  let slowFlex = sin(G.time.x * 1.25 + p.x * 0.38 + p.z * 0.42);
+  let rippleFlex = sin(G.time.x * 2.25 + p.y * 2.4 + (p.x - p.z) * 0.7);
+  jellyP.x = jellyP.x + sign(n.x) * (0.026 * slowFlex + 0.009 * rippleFlex) * belly;
+  jellyP.z = jellyP.z + sign(n.z) * (0.026 * slowFlex + 0.009 * rippleFlex) * belly;
+  let wp = (G.block * vec4f(jellyP, 1.0)).xyz;
   var o : VOut;
   o.pos = G.viewProj * vec4f(wp, 1.0);
   o.wp = wp; o.nrm = normalize((G.block * vec4f(n, 0.0)).xyz); o.face = face;
@@ -2698,18 +2727,37 @@ fn hSample(uv : vec2f) -> f32 {
   let d = textureLoad(heightTex, clamp(i1, vec2i(0), mx), 0).r;
   return mix(mix(a, b, fr.x), mix(c, d, fr.x), fr.y);
 }
+fn swellAt(p : vec2f) -> f32 {
+  return sin(p.x * 0.62 + G.time.x * 0.95) * 0.020
+       + sin(p.y * 0.81 - G.time.x * 0.72) * 0.015
+       + sin((p.x + p.y) * 1.05 + G.time.x * 1.35) * 0.008;
+}
+fn eventRippleAt(p : vec2f) -> f32 {
+  var height = 0.0;
+  for (var i = 0; i < 8; i = i + 1) {
+    let r = W.ripples[i];
+    let age = G.time.x - r.z;
+    if (age < 0.0 || age > 4.4) { continue; }
+    let d = length(p - r.xy);
+    let front = age * 2.05 + 0.05;
+    let width = 0.12 + age * 0.04;
+    let envelope = exp(-pow((d - front) / width, 2.0)) * exp(-age * 0.58) * r.w;
+    height = height + sin((d - front) * 18.0) * envelope * 0.045;
+  }
+  return height;
+}
+fn surfaceAt(p : vec2f, uv : vec2f) -> f32 {
+  return hSample(uv) + swellAt(p) + eventRippleAt(p);
+}
 @vertex fn vs(@location(0) p : vec3f, @location(1) uv : vec2f) -> VOut {
   let n = 167.0;
   let e = 1.0 / n;
-  let swell = sin(p.x * 0.62 + G.time.x * 0.95) * 0.013
-            + sin(p.z * 0.81 - G.time.x * 0.72) * 0.010
-            + sin((p.x + p.z) * 1.05 + G.time.x * 1.35) * 0.006;
-  let h = hSample(uv) + swell;
-  let hr = hSample(uv + vec2f(e, 0.0)) + sin((p.x + 0.096) * 0.62 + G.time.x * 0.95) * 0.013;
-  let hl = hSample(uv - vec2f(e, 0.0));
-  let hu = hSample(uv + vec2f(0.0, e));
-  let hd = hSample(uv - vec2f(0.0, e));
   let cell = 16.0 / n;
+  let h = surfaceAt(p.xz, uv);
+  let hr = surfaceAt(p.xz + vec2f(cell, 0.0), uv + vec2f(e, 0.0));
+  let hl = surfaceAt(p.xz - vec2f(cell, 0.0), uv - vec2f(e, 0.0));
+  let hu = surfaceAt(p.xz + vec2f(0.0, cell), uv + vec2f(0.0, e));
+  let hd = surfaceAt(p.xz - vec2f(0.0, cell), uv - vec2f(0.0, e));
   let dhdx = (hr - hl) / (2.0 * cell);
   let dhdz = (hu - hd) / (2.0 * cell);
   let ln = normalize(vec3f(-dhdx, 1.0, -dhdz));
@@ -2746,11 +2794,11 @@ fn hSample(uv : vec2f) -> f32 {
     let age = G.time.x - r.z;
     if (age < 0.0 || age > 4.4) { continue; }
     let d = length(in.ld.xz - r.xy);
-    let front = age * 1.75 + 0.05;
-    let band = exp(-pow((d - front) / (0.16 + age * 0.05), 2.0)) * exp(-age * 0.75) * r.w;
+    let front = age * 2.05 + 0.05;
+    let band = exp(-pow((d - front) / (0.12 + age * 0.04), 2.0)) * exp(-age * 0.58) * r.w;
     rippleAmt = rippleAmt + band;
     let dir = normalize(in.ld.xz - r.xy + vec2f(0.0001));
-    rn = rn + dir * cos((d - front) * 16.0) * band;
+    rn = rn + dir * cos((d - front) * 18.0) * band * 0.9;
   }
 
   var N = normalize(in.nrm + vec3f(rn.x * 0.55, 0.0, rn.y * 0.55));
@@ -2795,7 +2843,7 @@ fn hSample(uv : vec2f) -> f32 {
   let lace = fbm2(vec2f(in.ld.x * 9.0, in.ld.z * 9.0) + G.time.x * 0.06);
   let shoreFoam = smoothstep(0.16, 0.0, thick) * smoothstep(0.42, 0.72, lace);
   let crest = smoothstep(0.035, 0.10, in.hgt) * 0.5;
-  let foam = clamp(shoreFoam * 1.4 + crest + rippleAmt * 1.8, 0.0, 1.0);
+  let foam = clamp(shoreFoam * 1.4 + crest + rippleAmt * 2.25, 0.0, 1.0);
   c = mix(c, vec3f(2.3, 2.45, 2.45), foam * 0.92);
 
   // caustic shimmer on the surface
