@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="体验 Codex 和 Hermes 独立制作的两版果冻海岛。">
+  <title>果冻海岛 · Atoll Jelly</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100svh; display: grid; place-items: center; padding: 32px 24px; background: #f0ede5; color: #183533; font-family: system-ui, "Microsoft YaHei", sans-serif; }
+    main { width: min(100%, 700px); }
+    h1 { font-family: "Songti SC", SimSun, serif; font-size: clamp(50px, 11vw, 96px); font-weight: 600; letter-spacing: -.05em; margin: 10px 0 18px; }
+    header > p { margin: 0; color: #355b58; }
+    .label { font: 700 13px/1.4 ui-monospace, monospace; letter-spacing: .16em; text-transform: uppercase; }
+    nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 36px 0 24px; }
+    a { display: grid; gap: 10px; padding: 24px; border-radius: 10px; border: 1px solid #2f675b66; color: #164238; text-decoration: none; background: #e2eee4; }
+    a + a { background: #e0edf0; color: #124757; border-color: #286c7d66; }
+    a:hover { border-color: currentColor; }
+    a:focus-visible { outline: 3px solid #1c7362; outline-offset: 4px; }
+    strong { font-size: 22px; }
+    small { font-size: 14px; }
+    footer { color: #355b58; line-height: 1.6; }
+    @media(max-width: 490px) { nav { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="label" lang="en">Atoll Jelly</p>
+      <h1>果冻海岛</h1>
+      <p>同一道题，两份独立制作的交互式海岛。</p>
+    </header>
+    <nav aria-label="选择版本">
+      <a href="./codex/"><strong>打开 Codex 版</strong><small>GPT-6.1 Sol</small></a>
+      <a href="./hermes/"><strong>打开 Hermes 版</strong><small>DeepSeek V4.1 Flash</small></a>
+    </nav>
+    <footer>完整 3D 体验需要浏览器和设备支持 WebGPU。</footer>
+  </main>
+</body>
+</html>
